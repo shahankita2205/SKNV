@@ -1,0 +1,59 @@
+services:
+  web:
+    build:
+      context: ./
+      dockerfile: infrastructure/dev/api.Dockerfile
+    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000 --reload
+    ports:
+      - 8000:8000
+    volumes:
+      - ./apps/api:/app
+    env_file:
+      - ./.env.dev
+  celery:
+    build:
+      context: ./
+      dockerfile: infrastructure/dev/api.Dockerfile
+    command: watchmedo auto-restart -R -d tasks/ -p '*.py' -- celery --app=core worker -B --loglevel=debug --logfile=celery.log
+    volumes:
+      - ./apps/api:/app
+    environment:
+      - DEBUG=1
+      - CELERY_BROKER=redis://redis:6379/0
+      - CELERY_BACKEND=redis://redis:6379/0
+    env_file:
+      - ./.env.dev
+    depends_on:
+      - web
+      - redis
+  redis:
+    image: redis:7-alpine
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      - POSTGRES_DB=nextgen
+      - POSTGRES_USER=nextgen
+      - POSTGRES_PASSWORD=nextgenpass
+      - 5432:5432
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  dashboard:
+    build:
+      context: ./
+      dockerfile: infrastructure/dev/api.Dockerfile
+    command: celery flower -A core --port=5555 --broker=redis://redis:6379/0
+    ports:
+      - 5555:5555
+    environment:
+      - DEBUG=1
+      - CELERY_BROKER=redis://redis:6379/0
+      - CELERY_BACKEND=redis://redis:6379/0
+    depends_on:
+      - web
+      - redis
+      - celery
+
+volumes:
+  pg_data:

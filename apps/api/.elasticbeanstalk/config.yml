@@ -1,0 +1,17 @@
+branch-defaults:
+  main:
+    environment: nextgen-api-test
+  production:
+    environment: nextgen-api-prod
+global:
+  application_name: nextgen
+  default_ec2_keyname: key-0ed4dde5393b82928
+  default_platform: Python 3.13 running on 64bit Amazon Linux 2023/4.5.0
+  default_region: us-east-1
+  include_git_submodules: true
+  instance_profile: null
+  platform_name: Python 3.13
+  platform_version: 4.5.0
+  profile: null
+  sc: git
+  workspace_type: Application
