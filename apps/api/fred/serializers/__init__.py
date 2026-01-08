@@ -15,5 +15,16 @@ from .dashboard import *
 # Doctor serializers and service - fully migrated
 from .doctor import *
 from .officetype import *
+from .office import *
+from .address import *
+from .officeinfo import *
+from .officehistory import *
+from .payment import *
+from .rx import *
+from .rxfill import *
+from .user import *
+from .token import *
+from .s3 import *
+from .user import *
 
 __all__ = []

@@ -10,7 +10,10 @@ Legacy Controller Mapping: StateController, AddressController, FaqController
 
 Grouping Rationale: State, Address, and Faq are all lookup/reference data.
 """
+
 from django.db import models
+from datetime import datetime
+
 
 class Faq(models.Model):
     id = models.AutoField(primary_key=True)
@@ -23,8 +26,25 @@ class Faq(models.Model):
         managed = False
         db_table = "faq"
 
+
 __all__ = [
     # 'State',
     # 'Address',
-    'Faq',
+    "Faq",
 ]
+
+
+class Address(models.Model):
+    address1 = models.TextField(blank=True, null=True)
+    address2 = models.TextField(blank=True, null=True)
+    city = models.TextField(blank=True, null=True)
+    state = models.TextField(blank=True, null=True)
+    zip = models.TextField(blank=True, null=True)
+    created = models.DateTimeField(auto_now_add=True)
+    type = models.TextField(blank=True, null=True)
+    zip4 = models.CharField(max_length=5, blank=True, null=True)
+    latlong = models.TextField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "address"

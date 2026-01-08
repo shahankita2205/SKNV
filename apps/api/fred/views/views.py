@@ -18,7 +18,7 @@ import secrets
 logger = logging.getLogger(__name__)
 
 from fred.models import (
-    Address,
+    Address2,
     Allergens,
     AuditTable,
     Automatedtasks,
@@ -146,13 +146,13 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 class FredAddressView(generics.ListCreateAPIView):
-    queryset = Address.objects.all().using("fred")
+    queryset = Address2.objects.all().using("fred")
     serializer_class = FredAddressSerializer
     pagination_class = StandardResultsSetPagination
 
 
 class FredAddressDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Address.objects.all().using("fred")
+    queryset = Address2.objects.all().using("fred")
     serializer_class = FredAddressSerializer
 
 

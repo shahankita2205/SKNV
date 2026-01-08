@@ -2,7 +2,7 @@ from django.utils import timezone
 from django.conf import settings
 from rest_framework import serializers
 from fred.models import (
-    Address,
+    Address2,
     Allergens,
     AuditTable,
     Automatedtasks,
@@ -61,7 +61,7 @@ from fred.models import (
 
 class FredAddressSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Address
+        model = Address2
         fields = "__all__"
 
 

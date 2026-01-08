@@ -12,7 +12,7 @@ from .logs import *
 from .reference import *
 
 from .doctor import Doctor
-from .officetype import *
+from .office import *
 
 # from .patient import *
 # from .user import *

@@ -33,5 +33,6 @@ from .dashboard import *
 # Doctor views - fully migrated
 from .doctor import *
 from .officetype import *
+from .office import *
 
 __all__ = []

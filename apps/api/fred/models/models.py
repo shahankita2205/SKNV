@@ -9,7 +9,7 @@ from django.db import models
 from decimal import Decimal
 
 
-class Address(models.Model):
+class Address2(models.Model):
     address1 = models.TextField(blank=True, null=True)
     address2 = models.TextField(blank=True, null=True)
     city = models.TextField(blank=True, null=True)
@@ -74,16 +74,6 @@ class Automatedtasks(models.Model):
     class Meta:
         managed = False
         db_table = "automatedtasks"
-
-
-class Deletedoffice(models.Model):
-    officeid = models.IntegerField(db_column="officeId")  # Field name made lowercase.
-    details = models.TextField()
-    created = models.DateTimeField()
-
-    class Meta:
-        managed = False
-        db_table = "deletedOffice"
 
 
 class Device(models.Model):
@@ -451,125 +441,6 @@ class NdcExchange(models.Model):
     class Meta:
         managed = False
         db_table = "ndc_exchange"
-
-
-class Office(models.Model):
-    addressid = models.IntegerField(blank=True, null=True)
-    name = models.TextField(blank=True, null=True)
-    created = models.DateTimeField()
-    locationid = models.TextField(blank=True, null=True)
-    sales = models.TextField(blank=True, null=True)
-    altaddress = models.TextField(blank=True, null=True)
-    users = models.TextField(blank=True, null=True)
-    logo = models.TextField(blank=True, null=True)
-    dhenabled = models.BooleanField(blank=True, null=True)
-    allowmsgconsult = models.BooleanField(blank=True, null=True)
-    allowvideoconsult = models.BooleanField(blank=True, null=True)
-    allowmsgfreeform = models.BooleanField(blank=True, null=True)
-    videoconsultfee = models.IntegerField(blank=True, null=True)
-    msgconsultfee = models.IntegerField(blank=True, null=True)
-    displayname = models.TextField(blank=True, null=True)
-    netsuiteid = models.IntegerField(blank=True, null=True)
-    allowchatconsult = models.BooleanField(blank=True, null=True)
-    chatconsultfee = models.IntegerField(blank=True, null=True)
-    email = models.CharField(max_length=8192, blank=True, null=True)
-    acct = models.TextField(blank=True, null=True)
-    route = models.CharField(max_length=8192, blank=True, null=True)
-    officeemail = models.CharField(max_length=8192, blank=True, null=True)
-    primaryemail = models.CharField(max_length=8192, blank=True, null=True)
-    delivermode = models.CharField(max_length=8192, blank=True, null=True)
-    suppresssknvmessaging = models.BooleanField(blank=True, null=True)
-    suppressrefills = models.BooleanField(blank=True, null=True)
-    inofficedispense = models.BooleanField(blank=True, null=True)
-    allownewpatientreqconsult = models.BooleanField(blank=True, null=True)
-    officeslug = models.CharField(max_length=8192, blank=True, null=True)
-    vendorid = models.IntegerField(blank=True, null=True)
-    modified = models.DateTimeField(blank=True, null=True)
-    synced = models.DateTimeField(blank=True, null=True)
-    dtcstates = models.TextField(blank=True, null=True)
-    suppresspairings = models.BooleanField(blank=True, null=True)
-    officetypeid = models.ForeignKey(
-        "Officetype", models.DO_NOTHING, db_column="officetypeid", blank=True, null=True
-    )
-    officeagreementtypeid = models.IntegerField(blank=True, null=True)
-    note = models.TextField(blank=True, null=True)
-    virtualinventoryenabled = models.BooleanField(default=False)
-    vi_status = models.IntegerField(blank=True, null=True)
-    replenishmentoptout = models.BooleanField(default=False)
-    parentid = models.IntegerField(blank=True, null=True)
-    vifeeshippinghandling = models.FloatField(default=8.0, blank=True, null=True)
-    vifeeservice = models.FloatField(default=5.0, blank=True, null=True)
-    viproceedstype = models.IntegerField(blank=True, null=True)
-    vivendorid = models.IntegerField(blank=True, null=True)
-    vicontactid = models.IntegerField(blank=True, null=True)
-    vicontracttoken = models.TextField(blank=True, null=True)
-    dio2 = models.BooleanField(default=False)
-
-    class Meta:
-        managed = False
-        db_table = "office"
-
-
-class Officeagreementtype(models.Model):
-    id = models.AutoField(primary_key=True)
-    agreementname = models.TextField(
-        db_column="agreementName"
-    )  # Field name made lowercase.
-    agreementdescription = models.TextField(
-        db_column="agreementDescription", blank=True, null=True
-    )  # Field name made lowercase.
-    createdat = models.DateTimeField(
-        db_column="createdAt"
-    )  # Field name made lowercase.
-    modifiedat = models.DateTimeField(
-        db_column="modifiedAt"
-    )  # Field name made lowercase.
-
-    class Meta:
-        managed = False
-        db_table = "officeAgreementType"
-
-
-class Officehistory(models.Model):
-    id = models.AutoField(primary_key=True)
-    officeid = models.IntegerField(db_column="officeId")  # Field name made lowercase.
-    triggeredaction = models.TextField(
-        db_column="triggeredAction", blank=True, null=True
-    )  # Field name made lowercase.
-    datelogged = models.DateTimeField(
-        db_column="dateLogged", blank=True, null=True
-    )  # Field name made lowercase.
-    olddata = models.JSONField(
-        db_column="oldData", blank=True, null=True
-    )  # Field name made lowercase.
-    newdata = models.JSONField(
-        db_column="newData", blank=True, null=True
-    )  # Field name made lowercase.
-    userid = models.IntegerField(
-        db_column="userId", blank=True, null=True
-    )  # Field name made lowercase.
-
-    class Meta:
-        managed = False
-        db_table = "officeHistory"
-
-
-class Officeinfo(models.Model):
-    officeid = models.ForeignKey(Office, models.DO_NOTHING, db_column="officeid")
-    featuredskincare = models.TextField(blank=True, null=True)
-    abouthtml = models.TextField(blank=True, null=True)
-    herobackground = models.TextField(blank=True, null=True)
-    avatartoshow = models.TextField(blank=True, null=True)
-    officeimage = models.TextField(blank=True, null=True)
-    created = models.DateTimeField()
-    modified = models.DateTimeField(blank=True, null=True)
-    fax = models.TextField(blank=True, null=True)
-    primaryphone = models.TextField(blank=True, null=True)
-    reminderopt = models.BooleanField(blank=True, null=True)
-
-    class Meta:
-        managed = False
-        db_table = "officeinfo"
 
 
 class Othermedication(models.Model):

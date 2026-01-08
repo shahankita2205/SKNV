@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from ..models.officetype import Officetype
+from ..models.office import Officetype
 from ..serializers.officetype import OfficeTypeSerializer
 
 

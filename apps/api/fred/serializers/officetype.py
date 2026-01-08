@@ -1,5 +1,7 @@
 from rest_framework import serializers
-from ..models.officetype import Officetype
+from fred.models.office import (
+    Officetype,
+)
 
 
 class OfficeTypeSerializer(serializers.ModelSerializer):
