@@ -15,5 +15,6 @@ from .dashboard import *
 # Doctor serializers and service - fully migrated
 from .doctor import *
 from .officetype import *
+from .textsent import *
 
 __all__ = []

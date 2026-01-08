@@ -150,6 +150,8 @@ from .views import (
     DashboardFulfillmentReportView,
     DashboardTrendsReportView,
     DashboardSumsReportView,
+    FailedTextNoPatientView,
+    FailedTextPCDeliversView,
 )
 
 urlpatterns = [
@@ -702,5 +704,15 @@ urlpatterns = [
         "office-types/",
         OfficeTypeListView.as_view(),
         name="doctor_list",
+    ),
+    path(
+        "failed-text/not-delivered-pc-delivers/",
+        FailedTextPCDeliversView.as_view(),
+        name="failed_text_pc_delivers",
+    ),
+    path(
+        "failed-text/not-delivered-no-patient/",
+        FailedTextNoPatientView.as_view(),
+        name="failed_text_no_patient",
     ),
 ]

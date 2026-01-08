@@ -997,7 +997,7 @@ class Textsent(models.Model):
 
     class Meta:
         managed = False
-        db_table = "textSent"
+        db_table = "textsent"
 
 
 class Token(models.Model):
