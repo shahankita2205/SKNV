@@ -13,6 +13,8 @@ import logging
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from django.db import transaction
+from django.conf import settings
 
 
 from fred.serializers.office import (
@@ -1392,25 +1394,52 @@ class OfficeSkincareParingsView(APIView):
             )
 
 
+# class OfficeProviderSkincarePairingsView(APIView):
+#     """
+#     API view for provider skincare pairings.
+
+#     GET /offices/provider-skincare-pairings/{id}/
+#     """
+
+#     def get(self, request, pk):
+#         try:
+#             pairings = OfficeService.get_provider_skincare_pairings(pk)
+#             return Response(pairings, status=status.HTTP_200_OK)
+#         except OfficeServiceException as e:
+#             return Response(
+#                 {"error": e.message, "code": e.code}, status=status.HTTP_404_NOT_FOUND
+#             )
+#         except Exception as e:
+#             logger.error(
+#                 f"Error getting provider skincare pairings for office {pk}: {e}"
+#             )
+#             return Response(
+#                 {"error": "An unexpected error occurred"},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             )
 class OfficeProviderSkincarePairingsView(APIView):
     """
-    API view for provider skincare pairings.
-
-    GET /offices/provider-skincare-pairings/{id}/
+    GET /offices/provider-skincare-pairings?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
     """
 
-    def get(self, request, pk):
+    def get(self, request):
         try:
-            pairings = OfficeService.get_provider_skincare_pairings(pk)
-            return Response(pairings, status=status.HTTP_200_OK)
-        except OfficeServiceException as e:
-            return Response(
-                {"error": e.message, "code": e.code}, status=status.HTTP_404_NOT_FOUND
+            start_date = request.query_params.get("startDate")
+            end_date = request.query_params.get("endDate")
+
+            if not start_date or not end_date:
+                return Response(
+                    {"error": "startDate and endDate are required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            pairings = OfficeService.get_provider_skincare_pairings(
+                request.user, start_date, end_date
             )
+            return Response({"pairings": pairings}, status=status.HTTP_200_OK)
+
         except Exception as e:
-            logger.error(
-                f"Error getting provider skincare pairings for office {pk}: {e}"
-            )
+            logger.exception("Provider skincare pairings error")
             return Response(
                 {"error": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1423,23 +1452,22 @@ class OfficeDioBySkuView(APIView):
 
     GET /offices/getdiobysku/{id}/
     """
-
     def get(self, request, pk):
         try:
             sku = request.query_params.get("sku")
             items = OfficeService.get_dio_by_sku(pk, sku)
             return Response(items, status=status.HTTP_200_OK)
-        except OfficeServiceException as e:
-            return Response(
-                {"error": e.message, "code": e.code}, status=status.HTTP_404_NOT_FOUND
-            )
+
         except Exception as e:
-            logger.error(f"Error getting DIO items for office {pk}: {e}")
+            logger.exception("DIO by SKU error")
             return Response(
-                {"error": "An unexpected error occurred"},
+                {
+                    "error": True,
+                    "message": "Failed to generate inventory report.",
+                    "debug": str(e),
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
 
 class OfficeUpdateSkusView(APIView):
     """
@@ -1471,11 +1499,37 @@ class OfficeUpdateSkusView(APIView):
             )
 
 
+# class OfficeLoadDioView(APIView):
+#     """
+#     API view to load DIO configuration.
+
+#     GET /offices/loadDIO/
+#     """
+
+#     def get(self, request):
+#         try:
+#             office_id = request.query_params.get("office_id")
+#             if office_id:
+#                 office_id = int(office_id)
+
+#             result = OfficeService.load_dio(office_id)
+#             return Response(result, status=status.HTTP_200_OK)
+#         except OfficeServiceException as e:
+#             return Response(
+#                 {"error": e.message, "code": e.code}, status=status.HTTP_404_NOT_FOUND
+#             )
+#         except Exception as e:
+#             logger.error(f"Error loading DIO: {e}")
+#             return Response(
+#                 {"error": "An unexpected error occurred"},
+#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             )
+
 class OfficeLoadDioView(APIView):
     """
     API view to load DIO configuration.
-
-    GET /offices/loadDIO/
+    GET  /offices/loadDIO/
+    POST /offices/loadDIO/
     """
 
     def get(self, request):
@@ -1486,17 +1540,35 @@ class OfficeLoadDioView(APIView):
 
             result = OfficeService.load_dio(office_id)
             return Response(result, status=status.HTTP_200_OK)
-        except OfficeServiceException as e:
-            return Response(
-                {"error": e.message, "code": e.code}, status=status.HTTP_404_NOT_FOUND
-            )
+
         except Exception as e:
             logger.error(f"Error loading DIO: {e}")
             return Response(
-                {"error": "An unexpected error occurred"},
+                {"error": True, "message": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
+    # ✅ PHP: loadDIOItemAction
+    def post(self, request):
+        try:
+            office_id = request.data.get("officeid")
+            netsuite_id = request.data.get("netsuiteid")
+            sku = request.data.get("sku")
+
+            result = OfficeService.load_dio_item(
+                office_id=office_id,
+                netsuiteid=netsuite_id,
+                sku=sku,
+            )
+
+            return Response(result, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Error loading DIO item: {e}")
+            return Response(
+                {"error": True, "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 class OfficeSaveDioShipmentView(APIView):
     """
@@ -1532,6 +1604,93 @@ class OfficeSaveDioShipmentView(APIView):
                 {"error": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+class SaveDioShipmentView(APIView):
+    """
+    POST /savedioshipment
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        shipments_saved = 0
+        shipment_ids = []
+        failed_shipments = []
+
+        payload = request.data
+        token = payload.get("token")
+
+        # Token validation (same as PHP)
+        if token != settings.NETSUITE_API_TOKEN:
+            return Response(
+                {
+                    "shipmentsLoaded": 0,
+                    "loadedShipmentIDs": [],
+                    "failedShipments": [
+                        {"reason": "Invalid NetSuite token"}
+                    ],
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        data = payload.get("data", [])
+
+        with transaction.atomic(using="fred"):
+            for shipment in data:
+                try:
+                    netsuiteid = shipment.get("netsuite ID")
+                    sku = shipment.get("item")
+                    officename = shipment.get("Name")
+                    lotnumber = shipment.get("lot #")
+                    qty = shipment.get("qty shipped")
+                    sodate = shipment.get("SO Date")
+                    sonumber = shipment.get("SO #")
+                    ifdate = shipment.get("IF Date")
+                    ifnumber = shipment.get("IF #")
+
+                    if OfficeService.shipment_exists(
+                        sonumber, ifnumber, sku, netsuiteid, lotnumber
+                    ):
+                        failed_shipments.append(
+                            {
+                                "shipmentDetails": shipment,
+                                "reason": "DIO Shipment already exists",
+                            }
+                        )
+                        continue
+
+                    new_shipment = OfficeService.objects.using("fred").create(
+                        netsuiteid=netsuiteid,
+                        sku=sku,
+                        officename=officename,
+                        lotnumber=lotnumber,
+                        qty=qty,
+                        sodate=sodate,
+                        sonumber=sonumber,
+                        ifdate=ifdate,
+                        ifnumber=ifnumber,
+                    )
+
+                    shipments_saved += 1
+                    shipment_ids.append(new_shipment.id)
+
+                except Exception as e:
+                    failed_shipments.append(
+                        {
+                            "shipmentDetails": shipment,
+                            "reason": str(e),
+                        }
+                    )
+
+        return Response(
+            {
+                "shipmentsLoaded": shipments_saved,
+                "loadedShipmentIDs": shipment_ids,
+                "failedShipments": failed_shipments,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class OfficeDioOptoutView(APIView):
@@ -1648,4 +1807,5 @@ __all__ = [
     "OfficeDioOptoutView",
     "OfficeSaveDioShipmentView",
     "OfficeLoadDioView",
+    "SaveDioShipmentView",
 ]

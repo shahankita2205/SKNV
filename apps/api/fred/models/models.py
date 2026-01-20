@@ -949,6 +949,22 @@ class DioItems(models.Model):
         managed = False
         db_table = "dio_items"
 
+class DioShipments(models.Model):
+    netsuiteid = models.CharField(max_length=100)
+    sku = models.CharField(max_length=100)
+    officename = models.CharField(max_length=255)
+    lotnumber = models.CharField(max_length=100)
+    qty = models.IntegerField()
+    sodate = models.DateField()
+    sonumber = models.CharField(max_length=100)
+    ifdate = models.DateField()
+    ifnumber = models.CharField(max_length=100)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "dio_shipments"
+        managed = False
+
 
 class PrescriptionDispense(models.Model):
     """

@@ -195,6 +195,14 @@ from .views import (
     OfficeDioOptoutView,
     OfficeSaveDioShipmentView,
     OfficeLoadDioView,
+    SaveDioShipmentView,
+    DHSettingsView,
+    UpdateDHSettingsView,
+    DHCouponsView,
+    CreateDHCouponView,
+    UpdateDHCouponView,
+    DeleteDHCouponView,
+    FeedbacksView,
 )
 
 from fred.views import reference
@@ -874,10 +882,14 @@ urlpatterns = [
         OfficeEscrowReportView.as_view(),
         name="office-escrow-report",
     ),
+    # path(
+    #     "office/skincare-pairings/<int:pk>/",
+    #     OfficeSkincareParingsView.as_view(),
+    #     name="office-skincare-pairings",
+    # ),
     path(
-        "office/skincare-pairings/<int:pk>/",
-        OfficeSkincareParingsView.as_view(),
-        name="office-skincare-pairings",
+    "office/provider-skincare-pairings/",
+    OfficeProviderSkincarePairingsView.as_view(),
     ),
     path(
         "office/provider-skincare-pairings/<int:pk>/",
@@ -895,10 +907,15 @@ urlpatterns = [
         name="office-update-skus",
     ),
     path("office/loadDIO/", OfficeLoadDioView.as_view(), name="office-load-dio"),
+    # path(
+    #     "office/savedioshipment/",
+    #     OfficeSaveDioShipmentView.as_view(),
+    #     name="office-save-dio-shipment",
+    # ),
     path(
-        "office/savedioshipment/",
-        OfficeSaveDioShipmentView.as_view(),
-        name="office-save-dio-shipment",
+        "savedioshipment/",
+        SaveDioShipmentView.as_view(),
+        name="save-dio-shipment",
     ),
     path(
         "office/dio/optout/<int:pk>/",
@@ -929,5 +946,40 @@ urlpatterns = [
         "address/<str:address_id>/",
         reference.AddressOneView.as_view(),
         name="address_get_one",
+    ),
+    path(
+        "digitalhealth/dhsettings/",
+        DHSettingsView.as_view(),
+        name="dh_settings",
+    ),
+     path(
+        "digitalhealth/dhsettings",
+        UpdateDHSettingsView.as_view(),
+        name="update_dh_settings"
+    ),
+    path(
+        "digitalhealth/coupons",
+        DHCouponsView.as_view(),
+        name="dh_coupons"
+    ),
+    path(
+        "coupons/",
+        CreateDHCouponView.as_view(),
+        name="create_dh_coupon",
+    ),
+    path(
+        "coupons/<int:id>/",
+        UpdateDHCouponView.as_view(),
+        name="update_dh_coupon",
+    ),
+    path(
+        "coupons/<int:id>",
+        DeleteDHCouponView.as_view(),
+        name="delete_dh_coupon",
+    ),
+     path(
+        "feedbacks/",
+        FeedbacksView.as_view(),
+        name="feedbacks",
     ),
 ]

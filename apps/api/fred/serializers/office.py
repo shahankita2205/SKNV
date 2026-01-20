@@ -4,8 +4,10 @@ Office Serializers and Services
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,time
 from typing import Optional, List, Dict, Any, Union
+from django.db.models import OuterRef, Subquery,Value
+from django.db.models.functions import Upper
 from django.db import connections
 from django.db import transaction
 from django.db.models import Q, Count, Sum
@@ -19,6 +21,7 @@ from fred.models.office import (
 
 # Import other models from models.py
 from fred.models.models import (
+    DioShipments,
     Users,
     Rx,
     Payment,
@@ -1842,14 +1845,111 @@ class OfficeService:
 
         return results
 
-    @staticmethod
-    def get_provider_skincare_pairings(office_id: int) -> List[Dict[str, Any]]:
-        OfficeService.get_one(office_id)
+    # @staticmethod
+    # def get_provider_skincare_pairings(office_id: int) -> List[Dict[str, Any]]:
+    #     OfficeService.get_one(office_id)
 
-        pairings = (
+    #     pairings = (
+    #         Skincarepairings.objects.using("fred")
+    #         .filter(fredofficeid=str(office_id))
+    #         .values("prescribernpi")
+    #         .annotate(
+    #             total_revenue=Sum("product_net_revenue"),
+    #             order_count=Count("order_id", distinct=True),
+    #             product_count=Count("id"),
+    #         )
+    #     )
+
+    #     results = []
+    #     for pairing in pairings:
+    #         npi = pairing["prescribernpi"]
+    #         provider_data = {
+    #             "npi": npi,
+    #             "doctorName": None,
+    #             "totalRevenue": pairing["total_revenue"] or 0,
+    #             "orderCount": pairing["order_count"],
+    #             "productCount": pairing["product_count"],
+    #         }
+
+    #         if npi:
+    #             try:
+    #                 doctor = Doctor.objects.using("fred").filter(npi=npi).first()
+    #                 if doctor:
+    #                     provider_data["doctorName"] = doctor.name
+    #             except:
+    #                 pass
+
+    #         results.append(provider_data)
+
+    #     return results
+
+    # @staticmethod
+    # def get_provider_skincare_pairings(user, start_date: str, end_date: str):
+    #     # PHP equivalent of getOfficeIdsOfSalesAndManagers()
+    #     office_ids = OfficeService.get_office_ids_of_sales_and_managers(user)
+
+    #     start_dt = datetime.combine(
+    #         datetime.strptime(start_date, "%Y-%m-%d").date(), time.min
+    #     )
+    #     end_dt = datetime.combine(
+    #         datetime.strptime(end_date, "%Y-%m-%d").date(), time.max
+    #     )
+
+    #     queryset = (
+    #         Skincarepairings.objects.using("fred")
+    #         .filter(
+    #             fredofficeid__in=office_ids,
+    #             created__range=(start_dt, end_dt),
+    #         )
+    #         .values("fredofficeid", "prescribernpi")
+    #         .annotate(
+    #             total_revenue=Sum("product_net_revenue"),
+    #             order_count=Count("order_id", distinct=True),
+    #             product_count=Count("id"),
+    #         )
+    #     )
+
+    #     result = {}
+
+    #     for row in queryset:
+    #         office_id = row["fredofficeid"]
+    #         npi = row["prescribernpi"]
+
+    #         doctor = (
+    #             Doctor.objects.using("fred")
+    #             .filter(npi=npi)
+    #             .values("name")
+    #             .first()
+    #         )
+
+    #         result.setdefault(office_id, []).append({
+    #             "npi": npi,
+    #             "doctorName": doctor["name"] if doctor else None,
+    #             "totalRevenue": row["total_revenue"] or 0,
+    #             "orderCount": row["order_count"],
+    #             "productCount": row["product_count"],
+    #         })
+
+    #     return result
+
+    @staticmethod
+    def get_provider_skincare_pairings(user, start_date: str, end_date: str):
+        office_ids = OfficeService.get_office_ids_of_sales_and_managers(user)
+
+        start_dt = datetime.combine(
+            datetime.strptime(start_date, "%Y-%m-%d").date(), time.min
+        )
+        end_dt = datetime.combine(
+            datetime.strptime(end_date, "%Y-%m-%d").date(), time.max
+        )
+
+        queryset = (
             Skincarepairings.objects.using("fred")
-            .filter(fredofficeid=str(office_id))
-            .values("prescribernpi")
+            .filter(
+                fredofficeid__in=office_ids,
+                date_created__range=(start_dt, end_dt),  # ✅ FIXED
+            )
+            .values("fredofficeid", "prescribernpi")
             .annotate(
                 total_revenue=Sum("product_net_revenue"),
                 order_count=Count("order_id", distinct=True),
@@ -1857,63 +1957,120 @@ class OfficeService:
             )
         )
 
-        results = []
-        for pairing in pairings:
-            npi = pairing["prescribernpi"]
-            provider_data = {
+        result = {}
+
+        for row in queryset:
+            office_id = row["fredofficeid"]
+            npi = row["prescribernpi"]
+
+            doctor = (
+                Doctor.objects.using("fred")
+                .filter(npi=npi)
+                .values("name")
+                .first()
+            )
+
+            result.setdefault(office_id, []).append({
                 "npi": npi,
-                "doctorName": None,
-                "totalRevenue": pairing["total_revenue"] or 0,
-                "orderCount": pairing["order_count"],
-                "productCount": pairing["product_count"],
-            }
+                "doctorName": doctor["name"] if doctor else None,
+                "totalRevenue": row["total_revenue"] or 0,
+                "orderCount": row["order_count"],
+                "productCount": row["product_count"],
+            })
 
-            if npi:
-                try:
-                    doctor = Doctor.objects.using("fred").filter(npi=npi).first()
-                    if doctor:
-                        provider_data["doctorName"] = doctor.name
-                except:
-                    pass
-
-            results.append(provider_data)
-
-        return results
+        return result
 
     @staticmethod
-    def get_dio_by_sku(office_id: int, sku: str = None) -> List[Dict[str, Any]]:
-        OfficeService.get_one(office_id)
+    def get_office_ids_of_sales_and_managers(user) -> List[int]:
+        """
+        Python equivalent of PHP getOfficeIdsOfSalesAndManagers()
+        """
 
-        queryset = DioItems.objects.using("fred").filter(officeid=office_id)
+        # Normalize roles
+        roles = []
+
+        if hasattr(user, "roles"):
+            try:
+                # ManyToMany (most likely)
+                roles = list(user.roles.values_list("name", flat=True))
+            except Exception:
+                # List / tuple fallback
+                roles = list(user.roles)
+
+        # Admin → all offices
+        if user.is_superuser or "admin" in roles:
+            return list(
+                Office.objects.using("fred")
+                .values_list("id", flat=True)
+            )
+
+        # Sales / Sales Manager
+        if "sales" in roles or "sales-manager" in roles:
+            return list(
+                Office.objects.using("fred")
+                .filter(sales_rep_id=user.id)  # adjust if column differs
+                .values_list("id", flat=True)
+            )
+
+        return []
+
+    @staticmethod
+    def get_dio_by_sku(office_id: int, sku: str = None) -> Dict[str, Any]:
+        office = OfficeService.get_one(office_id)
+
+        if not office.dio2:
+            return {"success": True, "result": [], "count": 0}
+
+        # Latest medication per formulacode (ROW_NUMBER equivalent)
+        latest_med = (
+            Medication.objects.using("fred")
+            .filter(formulacode=OuterRef("formulacode"))
+            .order_by("-created")
+        )
+
+        queryset = (
+            DioItems.objects.using("fred")
+            .filter(
+                officeid=office_id,
+                formulacode__in=Medication.objects.using("fred")
+                .values("formulacode")
+            )
+            .annotate(
+                office_name=Subquery(
+                    Office.objects.filter(id=OuterRef("officeid")).values("name")[:1]
+                ),
+                ndc=Subquery(latest_med.values("ndc")[:1]),
+                brand_name=Subquery(latest_med.values("brand_name")[:1]),
+                formula=Subquery(latest_med.values("formula")[:1]),
+                upper=Upper(Subquery(latest_med.values("indication")[:1])),
+            )
+        )
 
         if sku:
             queryset = queryset.filter(formulacode__icontains=sku)
 
-        items = []
-        for item in queryset:
-            item_data = {
-                "id": item.id,
-                "officeId": item.officeid,
+        # IMPORTANT: rename fields here, NOT in annotate
+        result = [
+            {
+                "dio_id": item.id,            # dio_items.id
+                "id": item.officeid,          # office.id
+                "name": item.office_name,     # office.name
                 "formulacode": item.formulacode,
+                "ndc": item.ndc,
+                "brand_name": item.brand_name,
+                "formula": item.formula,
+                "upper": item.upper,
                 "active": item.active,
-                "created": item.created.isoformat() if item.created else None,
-                "medication": None,
             }
+            for item in queryset
+        ]
 
-            try:
-                med = Medication.objects.using("fred").get(formulacode=item.formulacode)
-                item_data["medication"] = {
-                    "ndc": med.ndc,
-                    "formula": med.formula,
-                    "brand_name": med.brand_name,
-                    "dosage": med.dosage,
-                }
-            except Medication.DoesNotExist:
-                pass
+        return {
+            "success": True,
+            "result": result,
+            "count": len(result),
+        }
 
-            items.append(item_data)
-
-        return items
 
     @staticmethod
     def update_skus(office_id: int, skus: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1963,61 +2120,169 @@ class OfficeService:
             "success": True,
         }
 
+    # @staticmethod
+    # def load_dio(office_id: int = None) -> Dict[str, Any]:
+    #     if office_id:
+    #         offices = [OfficeService.get_one(office_id)]
+    #     else:
+    #         offices = (
+    #             Office.objects.using("fred")
+    #             .filter(dio2=True)
+    #             .exclude(name__contains="(x)")
+    #         )
+
+    #     dio_data = []
+    #     for office in offices:
+    #         items = DioItems.objects.using("fred").filter(
+    #             officeid=office.id, active=True
+    #         )
+
+    #         office_items = []
+    #         for item in items:
+    #             item_data = {
+    #                 "id": item.id,
+    #                 "formulacode": item.formulacode,
+    #                 "active": item.active,
+    #             }
+
+    #             try:
+    #                 med = Medication.objects.using("fred").get(
+    #                     formulacode=item.formulacode
+    #                 )
+    #                 item_data["medication"] = {
+    #                     "ndc": med.ndc,
+    #                     "formula": med.formula,
+    #                     "brand_name": med.brand_name,
+    #                     "dosage": med.dosage,
+    #                     "size": med.size,
+    #                 }
+    #             except Medication.DoesNotExist:
+    #                 item_data["medication"] = None
+
+    #             office_items.append(item_data)
+
+    #         dio_data.append(
+    #             {
+    #                 "officeId": office.id,
+    #                 "officeName": office.name,
+    #                 "dio2Enabled": office.dio2,
+    #                 "virtualInventoryEnabled": office.virtualinventoryenabled,
+    #                 "viStatus": office.vi_status,
+    #                 "replenishmentOptout": office.replenishmentoptout,
+    #                 "itemCount": len(office_items),
+    #                 "items": office_items,
+    #             }
+    #         )
+
+    #     return {"officeCount": len(dio_data), "offices": dio_data}
+
+    # @staticmethod
+    # def load_dio(office_id: int = None) -> Dict[str, Any]:
+    #     if office_id:
+    #         offices = [OfficeService.get_one(office_id)]
+    #     else:
+    #         offices = (
+    #             Office.objects.using("fred")
+    #             .filter(dio2=True)
+    #             .exclude(name__contains="(x)")
+    #         )
+
+    #     dio_data = []
+
+    #     for office in offices:
+    #         items = DioItems.objects.using("fred").filter(
+    #             officeid=office.id, active=True
+    #         )
+
+    #         office_items = []
+
+    #         for item in items:
+    #             item_data = {
+    #                 "id": item.id,
+    #                 "formulacode": item.formulacode,
+    #                 "active": item.active,
+    #             }
+
+    #             # ✅ SAFE: latest medication only
+    #             med = (
+    #                 Medication.objects.using("fred")
+    #                 .filter(formulacode=item.formulacode)
+    #                 .order_by("-date_created")  # IMPORTANT
+    #                 .first()
+    #             )
+
+    #             if med:
+    #                 item_data["medication"] = {
+    #                     "ndc": med.ndc,
+    #                     "formula": med.formula,
+    #                     "brand_name": med.brand_name,
+    #                     "dosage": med.dosage,
+    #                     "size": med.size,
+    #                 }
+    #             else:
+    #                 item_data["medication"] = None
+
+    #             office_items.append(item_data)
+
+    #         dio_data.append(
+    #             {
+    #                 "officeId": office.id,
+    #                 "officeName": office.name,
+    #                 "dio2Enabled": office.dio2,
+    #                 "virtualInventoryEnabled": office.virtualinventoryenabled,
+    #                 "viStatus": office.vi_status,
+    #                 "replenishmentOptout": office.replenishmentoptout,
+    #                 "itemCount": len(office_items),
+    #                 "items": office_items,
+    #             }
+    #         )
+
+    #     return {"officeCount": len(dio_data), "offices": dio_data}
+
     @staticmethod
-    def load_dio(office_id: int = None) -> Dict[str, Any]:
-        if office_id:
-            offices = [OfficeService.get_one(office_id)]
-        else:
-            offices = (
-                Office.objects.using("fred")
-                .filter(dio2=True)
-                .exclude(name__contains="(x)")
-            )
-
-        dio_data = []
-        for office in offices:
-            items = DioItems.objects.using("fred").filter(
-                officeid=office.id, active=True
-            )
-
-            office_items = []
-            for item in items:
-                item_data = {
-                    "id": item.id,
-                    "formulacode": item.formulacode,
-                    "active": item.active,
+    def load_dio_item(office_id: int, netsuiteid: int, sku: str):
+        try:
+            if not office_id or not sku:
+                return {
+                    "error": True,
+                    "message": "officeid and sku are required",
                 }
 
-                try:
-                    med = Medication.objects.using("fred").get(
-                        formulacode=item.formulacode
-                    )
-                    item_data["medication"] = {
-                        "ndc": med.ndc,
-                        "formula": med.formula,
-                        "brand_name": med.brand_name,
-                        "dosage": med.dosage,
-                        "size": med.size,
-                    }
-                except Medication.DoesNotExist:
-                    item_data["medication"] = None
+            # PHP: if strlen($sku) < 6 → prepend 0
+            sku = str(sku)
+            if len(sku) < 6:
+                sku = sku.zfill(6)
 
-                office_items.append(item_data)
+            # PHP: getDIOItemByOfficeIdAndFormulaCodeIgnoreActive
+            exists = DioItems.objects.using("fred").filter(
+                officeid=office_id,
+                formulacode=sku,
+            ).exists()
 
-            dio_data.append(
-                {
-                    "officeId": office.id,
-                    "officeName": office.name,
-                    "dio2Enabled": office.dio2,
-                    "virtualInventoryEnabled": office.virtualinventoryenabled,
-                    "viStatus": office.vi_status,
-                    "replenishmentOptout": office.replenishmentoptout,
-                    "itemCount": len(office_items),
-                    "items": office_items,
+            if not exists:
+                new_item = DioItems.objects.using("fred").create(
+                    officeid=office_id,
+                    netsuiteid=netsuiteid,
+                    formulacode=sku,
+                    active=True,
+                )
+
+                return {
+                    "error": False,
+                    "message": new_item.id,
                 }
-            )
 
-        return {"officeCount": len(dio_data), "offices": dio_data}
+            return {
+                "error": True,
+                "message": "DIO Item already exists for office",
+            }
+
+        except Exception as e:
+            return {
+                "error": True,
+                "message": str(e),
+            }
+
 
     @staticmethod
     def save_dio_shipment(
@@ -2088,6 +2353,16 @@ class OfficeService:
             "itemsProcessed": len(processed_items),
             "items": processed_items,
         }
+    
+    @staticmethod
+    def shipment_exists(sonumber, ifnumber, sku, netsuiteid, lotnumber):
+        return DioShipments.objects.using("fred").filter(
+            sonumber=sonumber,
+            ifnumber=ifnumber,
+            sku=sku,
+            netsuiteid=netsuiteid,
+            lotnumber=lotnumber,
+        ).exists()
 
     @staticmethod
     def dio_opt_out(office_id: int, user_id: int = None) -> Dict[str, Any]:

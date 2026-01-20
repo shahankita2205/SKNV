@@ -20,6 +20,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 FRED_API = os.getenv("FRED_API", "https://api.fred.sknv.com")
+# settings.py
+NETSUITE_API_TOKEN = os.environ.get("NETSUITE_API_TOKEN")
+DIGITAL_HEALTH_API_URL = "http://localhost:3001"
+DIGITAL_HEALTH_API_TOKEN = (
+    "wrPZ36V62YNNXz1trNbwNFWAv6BxAmgsdOrEkpPbMO6OFfJ63Uifa1RFXW49mHfY"
+)
 
 
 # Quick-start development settings - unsuitable for production
