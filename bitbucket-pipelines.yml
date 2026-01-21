@@ -1,0 +1,96 @@
+image: python:3.13
+
+definitions:
+  steps:
+    test: &test-step
+      name: Test and Coverage
+      caches:
+        - pip
+      script:
+        - cd apps/api
+        - pip install -r requirements.txt
+        - pytest --maxfail=1 --disable-warnings --cov=. --cov-report=xml:coverage.xml
+        - mv coverage.xml ${BITBUCKET_CLONE_DIR}/coverage.xml
+      reports:
+        coverage: coverage.xml
+
+pipelines:
+  branches:
+    main:
+      - step: *test-step
+      - step:
+          name: Deploy to Test Environment
+          image: nikolaik/python-nodejs:python3.11-nodejs18
+          deployment: test
+          script:
+            # Install Terraform
+            - apt-get update && apt-get install -y wget gpg lsb-release
+            - wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+            - echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+            - apt-get update && apt-get install -y terraform
+
+            # Run Terraform
+            - cd infrastructure/terraform
+            - export DEPLOY_ENV=test
+            - terraform init -backend-config="environments/test-backend.hcl"
+            - terraform apply -auto-approve -var-file=environments/test.tfvars
+            - cd ../..
+
+            # Deploy API
+            - pip install "cython<3.0.0" wheel && pip install pyyaml==5.4.1 --no-build-isolation
+            - pip install awsebcli --upgrade --user
+            - cd apps/api
+            # Initialize EB CLI with the application
+            - /root/.local/bin/eb init nextgen-api --region us-east-1
+            - /root/.local/bin/eb use nextgen-api-test
+            # Update environment variables
+            - /root/.local/bin/eb setenv ENV_SECRET_ARN=$ENV_SECRET_ARN AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID AWS_DEFAULT_REGION="us-east-1" AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY DB_SECRET_ARN=$DB_SECRET_ARN
+            # Deploy application
+            - /root/.local/bin/eb deploy
+            # Build and deploy frontend
+            - cd ../..
+            - cd apps/frontend
+            - /root/.local/bin/eb init nextgen-frontend --region us-east-1
+            - /root/.local/bin/eb use nextgen-frontend-test
+            - /root/.local/bin/eb deploy
+    production:
+      - step: *test-step
+      - step:
+          name: Deploy to Production Environment
+          image: nikolaik/python-nodejs:python3.11-nodejs18
+          deployment: production
+          script:
+            # Install Terraform
+            - apt-get update && apt-get install -y wget gpg lsb-release
+            - wget -O- https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+            - echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list
+            - apt-get update && apt-get install -y terraform
+
+            # Run Terraform
+            - cd infrastructure/terraform
+            - export DEPLOY_ENV=prod
+            - terraform init -backend-config="environments/prod-backend.hcl"
+            - terraform apply -auto-approve -var-file=environments/prod.tfvars
+            - cd ../..
+
+            # Deploy API
+            - pip install "cython<3.0.0" wheel && pip install pyyaml==5.4.1 --no-build-isolation
+            - pip install awsebcli --upgrade --user
+            - cd apps/api
+            # Initialize EB CLI with the application
+            - /root/.local/bin/eb init nextgen-api --region us-east-1
+            - /root/.local/bin/eb use nextgen-api-prod
+            # Update environment variables
+            - /root/.local/bin/eb setenv ENV_SECRET_ARN=$ENV_SECRET_ARN AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID AWS_DEFAULT_REGION="us-east-1" AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY DB_SECRET_ARN=$DB_SECRET_ARN
+            # Deploy application
+            - /root/.local/bin/eb deploy
+            # Build and deploy frontend
+            - cd ../..
+            - cd apps/frontend
+            - /root/.local/bin/eb init nextgen-frontend --region us-east-1
+            - /root/.local/bin/eb use nextgen-frontend-prod
+            - /root/.local/bin/eb deploy
+
+  pull-requests:
+    "**":
+      - step: *test-step

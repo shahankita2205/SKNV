@@ -1,0 +1,17 @@
+branch-defaults:
+  main:
+    environment: nextgen-frontend-test
+  production:
+    environment: nextgen-frontend-prod
+global:
+  application_name: nextgen-frontend
+  default_ec2_keyname: key-0ed4dde5393b82928
+  default_platform: Node.js 22 running on 64bit Amazon Linux 2023/6.6.3
+  default_region: us-east-1
+  include_git_submodules: true
+  instance_profile: null
+  platform_name: Node.js 22
+  platform_version: 6.6.3
+  profile: null
+  sc: git
+  workspace_type: Application
