@@ -229,26 +229,162 @@ class OfficeListAltView(APIView):
 
     def get(self, request):
         try:
-            include_inactive = (
-                request.query_params.get("include_inactive", "false").lower() == "true"
+            performance = request.query_params.get("performance", "false").lower() in (
+                "true",
+                "1",
             )
 
-            qs = Office.objects.using("fred").all()
-            if not include_inactive:
-                qs = qs.exclude(name__contains="(x)")
+            user = request.user
+            role = getattr(user, "role", None)
+            user_id = user.id if user else None
 
-            offices = [
-                {
-                    "id": o.id,
-                    "name": o.name,
-                    "netsuiteid": o.netsuiteid,
-                    "created": o.created.isoformat() if o.created else None,
-                    "inofficedispense": o.inofficedispense,
-                }
-                for o in qs.order_by("name")
-            ]
+            managed_sales = []
+            if role == "sales-manager":
+                managed_sales = list(
+                    Users.objects.using("fred")
+                    .filter(managerid=user_id, role__in=["sales", "sales-manager"])
+                    .values_list("id", flat=True)
+                )
 
-            return Response(offices, status=status.HTTP_200_OK)
+            sql = """
+                SELECT o.*, 
+                       a.id AS addr_id, a.address1, a.address2, a.city, a.state, 
+                       a.zip, a.zip4, a.type AS addr_type, a.latlong, a.created AS addr_created
+                FROM office o
+                LEFT JOIN address a ON o.addressid = a.id
+            """
+
+            # First pass: fetch all offices and collect all sales IDs
+            offices_data = []
+            all_sales_ids = set()
+            show_totals = True
+
+            with connections["fred"].cursor() as cursor:
+                cursor.execute(sql)
+                cols = [c[0] for c in cursor.description]
+
+                for row in cursor.fetchall():
+                    row_dict = dict(zip(cols, row))
+                    sales_ids = parse_json_array(row_dict.get("sales") or "")
+                    all_sales_ids.update(sales_ids)
+                    offices_data.append((row_dict, sales_ids))
+
+            users_map = {}
+            if all_sales_ids:
+                for u in Users.objects.using("fred").filter(id__in=list(all_sales_ids)).values(
+                    "id", "first_name", "last_name", "email"
+                ):
+                    users_map[u["id"]] = u
+
+            result_list = []
+            for row_dict, sales_ids in offices_data:
+                add = False
+
+                if role == "sales":
+                    if user_id in sales_ids:
+                        add = True
+                elif role == "sales-manager":
+                    if user_id in sales_ids:
+                        add = True
+                    if any(sid in sales_ids for sid in managed_sales):
+                        add = True
+                else:
+                    add = True
+                    show_totals = False
+
+                if add:
+                    office_data = {
+                        "id": row_dict["id"],
+                        "addressid": row_dict["addressid"],
+                        "name": row_dict["name"],
+                        "created": (
+                            row_dict["created"].strftime("%Y-%m-%dT%H:%M:%SZ")
+                            if row_dict.get("created")
+                            else None
+                        ),
+                        "locationid": row_dict.get("locationid"),
+                        "sales": row_dict.get("sales"),
+                        "altaddress": row_dict.get("altaddress"),
+                        "users": row_dict.get("users"),
+                        "logo": row_dict.get("logo"),
+                        "dhenabled": row_dict.get("dhenabled"),
+                        "netsuiteid": row_dict.get("netsuiteid"),
+                        "email": row_dict.get("email"),
+                        "vendorid": row_dict.get("vendorid"),
+                        "modified": (
+                            row_dict["modified"].strftime("%Y-%m-%d %H:%M:%S")
+                            if row_dict.get("modified")
+                            else None
+                        ),
+                    }
+
+                    address_data = None
+                    if row_dict.get("addr_id"):
+                        address_data = {
+                            "id": row_dict["addr_id"],
+                            "address1": row_dict["address1"],
+                            "address2": row_dict["address2"],
+                            "city": row_dict["city"],
+                            "state": row_dict["state"],
+                            "zip": row_dict["zip"],
+                            "zip4": row_dict["zip4"],
+                            "type": row_dict["addr_type"],
+                            "latlong": row_dict["latlong"],
+                            "created": (
+                                row_dict["addr_created"].strftime("%Y-%m-%dT%H:%M:%SZ")
+                                if row_dict.get("addr_created")
+                                else None
+                            ),
+                        }
+
+                    sales_users = [users_map[sid] for sid in sales_ids if sid in users_map]
+
+                    item = {
+                        "office": office_data,
+                        "address": address_data,
+                        "sales": sales_users,
+                    }
+
+                    if performance:
+                        office_id = row_dict["id"]
+                        now = datetime.now()
+                        start_this = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                        end_this = (start_this + relativedelta(months=1)) - timedelta(seconds=1)
+                        start_last = start_this - relativedelta(months=1)
+                        end_last = start_this - timedelta(seconds=1)
+
+                        item["rxs"] = {
+                            "this_month": Rx.objects.using("fred").filter(
+                                officeid=office_id, created__gte=start_this, created__lte=end_this
+                            ).count(),
+                            "last_month": Rx.objects.using("fred").filter(
+                                officeid=office_id, created__gte=start_last, created__lte=end_last
+                            ).count(),
+                        }
+                        item["shipments"] = {
+                            "this_month": Shipment.objects.using("fred").filter(
+                                officeid=office_id, created__gte=start_this, created__lte=end_this
+                            ).count(),
+                            "last_month": Shipment.objects.using("fred").filter(
+                                officeid=office_id, created__gte=start_last, created__lte=end_last
+                            ).count(),
+                        }
+                        item["payments"] = {
+                            "this_month": Payment.objects.using("fred").filter(
+                                officeid=office_id, created__gte=start_this, created__lte=end_this
+                            ).count(),
+                            "last_month": Payment.objects.using("fred").filter(
+                                officeid=office_id, created__gte=start_last, created__lte=end_last
+                            ).count(),
+                        }
+                        if show_totals:
+                            item["rxs"]["total"] = Rx.objects.using("fred").filter(officeid=office_id).count()
+                            item["shipments"]["total"] = Shipment.objects.using("fred").filter(officeid=office_id).count()
+                            item["payments"]["total"] = Payment.objects.using("fred").filter(officeid=office_id).count()
+
+                    result_list.append(item)
+
+            return Response(result_list, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Error getting office list: {e}")
             return Response(
@@ -330,44 +466,98 @@ class OfficeUnassignedPaginatedView(APIView):
 
     def get(self, request):
         try:
-            page = int(request.query_params.get("page", 1))
-            limit = int(request.query_params.get("limit", 10))
-            search = request.query_params.get("search", None)
-
-            qs = Office.objects.using("fred").filter(
-                Q(sales__isnull=True) | Q(sales="") | Q(sales="[]")
+            performance = request.query_params.get("performance", "false").lower() in (
+                "true",
+                "1",
             )
-            total_records = qs.count()
 
-            if search:
-                qs = qs.filter(Q(name__icontains=search) | Q(email__icontains=search))
+            page = request.query_params.get("page")
+            page = int(page) if page and page not in ("0", "") else 1
 
-            filtered_records = qs.count()
-            offset = (page - 1) * limit
-            total_pages = (filtered_records + limit - 1) // limit if limit > 0 else 1
+            limit = request.query_params.get("limit")
+            limit = int(limit) if limit and limit not in ("0", "") else 25
 
-            offices = [
-                {
-                    "id": o.id,
-                    "name": o.name,
-                    "netsuiteid": o.netsuiteid,
-                    "email": o.email,
-                    "created": o.created.isoformat() if o.created else None,
-                }
-                for o in qs.order_by("name")[offset : offset + limit]
-            ]
+            length = request.query_params.get("length")
+            if length and int(length) > 0:
+                limit = int(length)
 
-            return Response(
-                {
-                    "offices": offices,
-                    "currentPage": page,
-                    "lastPage": total_pages,
-                    "recordsFiltered": filtered_records,
-                    "recordsTotal": total_records,
-                    "limit": limit,
-                },
-                status=status.HTTP_200_OK,
+            start = request.query_params.get("start")
+            if start and start not in ("0", ""):
+                start = int(start)
+                page = (start // limit) + 1
+
+            search = request.query_params.get("searchTerm", "").strip()
+            if not search:
+                search_value = request.query_params.get("search[value]", "").strip()
+                if search_value:
+                    search = search_value
+
+            order = request.query_params.get("order[0][column]")
+            order = int(order) if order and order not in ("0", "") else 0
+
+            order_dir = request.query_params.get("order[0][dir]", "").strip()
+            if order_dir not in ("asc", "desc"):
+                order_dir = "asc"
+
+            user = request.user
+            role = getattr(user, "role", None)
+            user_id = user.id
+
+            office_ids = None
+
+            if role == "sales":
+                office_ids = get_office_ids_by_user(user_id)
+                if not office_ids:
+                    return Response(
+                        {
+                            "offices": [],
+                            "firstPage": 1,
+                            "currentPage": page,
+                            "lastPage": 1,
+                            "recordsFiltered": 0,
+                            "nextPage": None,
+                            "previousPage": None,
+                            "recordsTotal": 0,
+                            "limit": limit,
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+
+            elif role == "sales-manager":
+                office_ids = list(
+                    set(
+                        get_office_ids_by_manager(user_id)
+                        + get_office_ids_by_user(user_id)
+                    )
+                )
+                if not office_ids:
+                    return Response(
+                        {
+                            "offices": [],
+                            "firstPage": 1,
+                            "currentPage": page,
+                            "lastPage": 1,
+                            "recordsFiltered": 0,
+                            "nextPage": None,
+                            "previousPage": None,
+                            "recordsTotal": 0,
+                            "limit": limit,
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+
+            office_serializer = OfficeModelSerializer()
+            results = office_serializer.list_paginated(
+                page=page,
+                limit=limit,
+                search=search if search else None,
+                order=order,
+                orderDir=order_dir,
+                office_ids=office_ids,
+                unassigned=True,
             )
+
+            return Response(results, status=status.HTTP_200_OK)
         except Exception as e:
             logger.error(f"Error getting unassigned offices: {e}")
             return Response(
@@ -384,37 +574,70 @@ class OfficeListWithAddressView(APIView):
 
     def get(self, request):
         try:
+            sql = """
+                SELECT 
+                    o.id,
+                    o.name,
+                    o.sales,
+                    o.users,
+                    o.locationid,
+                    o.created,
+                    o.altaddress,
+                    o.addressid,
+                    a.id AS address_id,
+                    a.address1,
+                    a.address2,
+                    a.city,
+                    a.state,
+                    a.zip,
+                    a.zip4,
+                    a.type AS address_type,
+                    a.latlong,
+                    a.created AS address_created
+                FROM office o
+                LEFT JOIN address a ON o.addressid = a.id
+            """
+
             offices = []
-            for office in (
-                Office.objects.using("fred")
-                .exclude(name__contains="(x)")
-                .order_by("name")
-            ):
-                office_data = {
-                    "id": office.id,
-                    "name": office.name,
-                    "netsuiteid": office.netsuiteid,
-                    "address": None,
-                }
-                if office.addressid:
-                    addr = (
-                        reference_serializer.AddressModelSerializer.get_address_by_id(
-                            office.addressid
-                        )
-                    )
-                    if addr:
-                        office_data["address"] = {
-                            k: addr.get(k)
-                            for k in (
-                                "id",
-                                "address1",
-                                "address2",
-                                "city",
-                                "state",
-                                "zip",
-                            )
+            with connections["fred"].cursor() as cursor:
+                cursor.execute(sql)
+                cols = [c[0] for c in cursor.description]
+                for row in cursor.fetchall():
+                    row_dict = dict(zip(cols, row))
+                    office_data = {
+                        "id": row_dict["id"],
+                        "name": row_dict["name"],
+                        "sales": row_dict["sales"],
+                        "users": row_dict["users"],
+                        "locationid": row_dict["locationid"],
+                        "created": (
+                            row_dict["created"].strftime("%Y-%m-%d %H:%M:%S")
+                            if row_dict["created"]
+                            else None
+                        ),
+                        "altaddress": row_dict["altaddress"],
+                        "addressid": row_dict["addressid"],
+                    }
+                    if row_dict["address_id"]:
+                        office_data["a"] = {
+                            "id": row_dict["address_id"],
+                            "address1": row_dict["address1"],
+                            "address2": row_dict["address2"],
+                            "city": row_dict["city"],
+                            "state": row_dict["state"],
+                            "zip": row_dict["zip"],
+                            "created": (
+                                row_dict["address_created"].strftime(
+                                    "%Y-%m-%dT%H:%M:%SZ"
+                                )
+                                if row_dict["address_created"]
+                                else None
+                            ),
+                            "type": row_dict["address_type"],
+                            "zip4": row_dict["zip4"],
+                            "latlong": row_dict["latlong"],
                         }
-                offices.append(office_data)
+                    offices.append(office_data)
 
             return Response(offices, status=status.HTTP_200_OK)
         except Exception as e:
@@ -439,17 +662,23 @@ class OfficeDetailView(APIView):
 
     def get(self, request, pk):
         try:
-            role = request.query_params.get("role", "admin")
-            user_id = request.query_params.get("user_id")
-            user_id = int(user_id) if user_id else None
+            user = request.user
+            role = getattr(user, "role", None)
+            user_id = user.id if user else None
 
             office = Office.objects.using("fred").get(pk=pk)
 
-            # Access control for doctor/office roles
-            if role in ("doctor", "office") and user_id:
+            access = True
+            if role in ("doctor", "office"):
+                access = False
                 users = parse_json_array(office.users)
-                if user_id not in users:
-                    return Response({"error": True}, status=status.HTTP_403_FORBIDDEN)
+                for uid in users:
+                    if int(uid) == int(user_id):
+                        access = True
+                        break
+
+            if not access:
+                return Response({"error": True}, status=status.HTTP_200_OK)
 
             serializer = OfficeDetailSerializer(office)
             return Response(serializer.data, status=status.HTTP_200_OK)
@@ -732,8 +961,8 @@ class OfficeSalesView(APIView):
                 user_data = {
                     "id": user.id,
                     "name": f"{user.first_name or ''} {user.last_name or ''}".strip(),
-                    "email": user.email,
                     "role": user.role,
+                    "email": user.email,
                 }
                 (assigned if user.id in sales_ids else available).append(user_data)
 
@@ -871,26 +1100,39 @@ class OfficeAddUserView(APIView):
                 {"error": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-
 class OfficeContactsView(APIView):
     """
     GET /office/contacts/{pk}/
-    Get office contacts.
+    Get office contacts (doctors from prescriptions).
     """
 
     def get(self, request, pk):
         try:
-            office = Office.objects.using("fred").get(pk=pk)
-            contacts = get_users_with_details(parse_json_array(office.users))
+            if not Office.objects.using("fred").filter(pk=pk).exists():
+                return Response(
+                    {"error": f"Office with id {pk} not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
-            return Response(contacts, status=status.HTTP_200_OK)
-
-        except Office.DoesNotExist:
-            return Response(
-                {"error": f"Office with id {pk} not found"},
-                status=status.HTTP_404_NOT_FOUND,
+            contacts = (
+                Rx.objects.using("fred")
+                .filter(officeid=pk)
+                .select_related()
+                .values("doctorid")
+                .distinct()
             )
+
+            doctor_ids = [c["doctorid"] for c in contacts if c["doctorid"]]
+            
+            doctors = (
+                Doctor.objects.using("fred")
+                .filter(id__in=doctor_ids)
+                .values("name", "phone")
+                .distinct()
+            )
+
+            return Response(list(doctors), status=status.HTTP_200_OK)
+
         except Exception as e:
             logger.error(f"Error getting contacts for office {pk}: {e}")
             return Response(
@@ -1040,7 +1282,23 @@ class OfficePrescribersView(APIView):
     def get(self, request, pk):
         try:
             Office.objects.using("fred").get(pk=pk)
-            prescribers = RxService.get_prescribers_by_office(pk)
+
+            doctor_stats = (
+                Rx.objects.using("fred")
+                .filter(officeid=pk, doctorid__isnull=False)
+                .values("doctorid")
+                .annotate(count=Count("id"))
+                .order_by("-count")
+            )
+
+            prescribers = []
+            for stat in doctor_stats:
+                try:
+                    doctor = Doctor.objects.using("fred").get(pk=stat["doctorid"])
+                    prescribers.append({stat["count"], doctor.name})
+                except Doctor.DoesNotExist:
+                    continue
+
             return Response(prescribers, status=status.HTTP_200_OK)
 
         except Office.DoesNotExist:

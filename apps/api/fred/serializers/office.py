@@ -237,6 +237,7 @@ class OfficeModelSerializer(serializers.ModelSerializer):
         order_dir = options.get("orderDir", "asc")
         search = options.get("search", "")
         office_ids = options.get("office_ids", None)
+        unassigned = options.get("unassigned", False)
 
         offset = (page - 1) * limit
         params = []
@@ -250,6 +251,9 @@ class OfficeModelSerializer(serializers.ModelSerializer):
             )
             WHERE 1=1
         """
+
+        if unassigned:
+            base_sql += " AND (o.sales IS NULL OR o.sales = '' OR o.sales = '[]')"
 
         if search:
             base_sql += """
@@ -308,18 +312,37 @@ class OfficeModelSerializer(serializers.ModelSerializer):
 class OfficeDetailSerializer(serializers.ModelSerializer):
     """Office serializer with nested address for detail views."""
 
-    address = serializers.SerializerMethodField()
-
     class Meta:
         model = Office
         fields = "__all__"
 
-    def get_address(self, obj) -> Optional[Dict]:
-        if obj.addressid:
-            return reference_serializer.AddressModelSerializer.get_address_by_id(
-                obj.addressid
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+
+        data["addressid"] = data.pop("address", None)
+
+        if instance.created:
+            data["created"] = instance.created.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if instance.modified:
+            data["modified"] = instance.modified.strftime("%Y-%m-%d %H:%M:%S")
+
+        if instance.vifeeshippinghandling is not None:
+            val = instance.vifeeshippinghandling
+            data["vifeeshippinghandling"] = str(int(val)) if val == int(val) else str(val)
+        if instance.vifeeservice is not None:
+            val = instance.vifeeservice
+            data["vifeeservice"] = str(int(val)) if val == int(val) else str(val)
+
+        address = None
+        if instance.address_id:
+            address = reference_serializer.AddressModelSerializer.get_address_by_id(
+                instance.address_id
             )
-        return None
+            if address and address.get("created") and "." in str(address["created"]):
+                address["created"] = str(address["created"]).split(".")[0] + "Z"
+        data["address"] = address
+
+        return data
 
 
 class OfficeCreateSerializer(serializers.Serializer):
