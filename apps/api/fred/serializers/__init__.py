@@ -13,6 +13,7 @@ from .reference import *
 from .dashboard import *
 from .medication import *
 from .patient import *
+from .text import *
 
 # Doctor serializers and service - fully migrated
 from .doctor import *
@@ -25,6 +26,5 @@ from .user import *
 from .token import *
 from .s3 import *
 from .user import *
-from .digital_health import *
 
 __all__ = []

@@ -2193,28 +2193,25 @@ class NoPaymentBaseView(generics.ListAPIView):
                 rxF.id AS "fillId",
                 rxF.status AS "fillStatus",
                 rx.virx AS virx,
-                po.call_outcome AS "callOutcome",
-                po.outreach_attempt AS "outreachAttempt",
-                po.call_summary AS "callSummary",
-                po.call_back AS "callBack",
-                CASE WHEN t.id IS NOT NULL THEN TRUE ELSE FALSE END AS tasked
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM task t 
+                    WHERE t.rxid = rx.id
+                    AND t.patientid = p.id
+                    AND t.type = 'call-for-payment' 
+                    AND t.csfillid = rxF.id
+                ) THEN TRUE ELSE FALSE END AS tasked
             FROM rxfill rxF
             INNER JOIN rx ON rx.id = rxF.rxid
             INNER JOIN office o ON o.id = rx.officeid
             INNER JOIN patient p ON p.id = rx.patientid
             INNER JOIN address a ON a.id = p.addressid
             LEFT JOIN medication m ON m.ndc = rx.medicationid
-            LEFT JOIN patient_outreach po ON po.rx_fillid = rxF.id
-            LEFT JOIN task t 
-                ON t.rxid = rx.id
-                AND t.patientid = p.id
-                AND t.type = 'call-for-payment' 
-                AND t.csfillid = rxF.id
             WHERE rx.status = 'ok'
                 {refills_condition}
                 AND rxF.type = '{self.rx_type}'
                 AND rxF.paymentid IS NULL
                 AND rxF.created > %s
+                AND rxF.status NOT IN ('dispensedInOffice', 'verifyInOfficeDispenseNoOffice') 
             ORDER BY rxF.created ASC
             LIMIT %s OFFSET %s
         """
@@ -2234,6 +2231,7 @@ class NoPaymentBaseView(generics.ListAPIView):
                 AND rxF.type = '{self.rx_type}'
                 AND rxF.paymentid IS NULL
                 AND rxF.created > %s
+                AND rxF.status NOT IN ('dispensedInOffice', 'verifyInOfficeDispenseNoOffice')
         """
 
     def _calculate_fill_numbers(self, results):

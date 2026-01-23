@@ -15,6 +15,7 @@ from .medication import *
 
 from .patient import *
 from .user import *
+from .text import *
 
 # from .office import *
 # from .rx import *
@@ -35,6 +36,5 @@ from .user import *
 from .doctor import *
 from .officetype import *
 from .office import *
-from .digital_health import *
 
 __all__ = []
