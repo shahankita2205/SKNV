@@ -374,6 +374,12 @@ DH_APP_URL = os.environ.get("DH_APP_URL", "")
 INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
 API_DOMAIN = os.environ.get("API_DOMAIN", "")
 
+DIGITAL_HEALTH_API_URL = os.environ.get("DIGITAL_HEALTH_API_URL", "http://localhost:3001")
+DIGITAL_HEALTH_API_TOKEN = os.environ.get(
+    "DIGITAL_HEALTH_API_TOKEN",
+    "wrPZ36V62YNNXz1trNbwNFWAv6BxAmgsdOrEkpPbMO6OFfJ63Uifa1RFXW49mHfY",
+)
+
 HUBSPOT_ACCESS_TOKEN = os.environ.get("HUBSPOT_ACCESS_TOKEN", "")
 HUBSPOT_DEBUG = False
 

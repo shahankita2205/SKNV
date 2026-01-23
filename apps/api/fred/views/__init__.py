@@ -35,5 +35,6 @@ from .user import *
 from .doctor import *
 from .officetype import *
 from .office import *
+from .digital_health import *
 
 __all__ = []

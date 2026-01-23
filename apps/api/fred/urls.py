@@ -216,6 +216,13 @@ from .views import (
     OfficeDioOptoutView,
     OfficeSaveDioShipmentView,
     OfficeLoadDioView,
+    DHSettingsView,
+    UpdateDHSettingsView,
+    DHCouponsView,
+    CreateDHCouponView,
+    UpdateDHCouponView,
+    DeleteDHCouponView,
+    FeedbacksView,
 )
 
 from fred.views import reference
@@ -1087,5 +1094,43 @@ urlpatterns = [
             }
         ),
         name="patient_one",
+    ),
+    # Digital Health Settings urls
+    path(
+        "digital-health/settings/",
+        DHSettingsView.as_view(),
+        name="dh_settings",
+    ),
+    path(
+        "digital-health/settings/update/",
+        UpdateDHSettingsView.as_view(),
+        name="update_dh_settings",
+    ),
+    # Digital Health Coupons urls
+    path(
+        "digital-health/coupons/",
+        DHCouponsView.as_view(),
+        name="dh_coupons",
+    ),
+    path(
+        "digital-health/coupons/create/",
+        CreateDHCouponView.as_view(),
+        name="create_dh_coupon",
+    ),
+    path(
+        "digital-health/coupons/<int:pk>/",
+        UpdateDHCouponView.as_view(),
+        name="update_dh_coupon",
+    ),
+    path(
+        "digital-health/coupons/<int:pk>/delete/",
+        DeleteDHCouponView.as_view(),
+        name="delete_dh_coupon",
+    ),
+    # Feedbacks urls
+    path(
+        "feedbacks/",
+        FeedbacksView.as_view(),
+        name="feedbacks",
     ),
 ]

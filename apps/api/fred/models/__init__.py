@@ -17,6 +17,8 @@ from .office import *
 
 from .patient import *
 
+from .digital_health import *
+
 # from .user import *
 # from .office import *
 # from .rx import *
@@ -26,7 +28,6 @@ from .patient import *
 # from .communication import *
 # from .task import *
 # from .eligibility import *
-# from .digital_health import *
 # from .vi import *
 
 __all__ = []

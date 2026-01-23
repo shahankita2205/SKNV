@@ -25,5 +25,6 @@ from .user import *
 from .token import *
 from .s3 import *
 from .user import *
+from .digital_health import *
 
 __all__ = []
