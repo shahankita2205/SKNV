@@ -788,6 +788,35 @@ class Textsent(models.Model):
         db_table = "textSent"
 
 
+class Dio2OptOut(models.Model):
+    officeid = models.IntegerField(db_column="officeid")
+    npi = models.CharField(max_length=64, blank=True, null=True)
+    name = models.CharField(max_length=255, blank=True, null=True)
+    deletedat = models.DateTimeField(db_column="deletedat", blank=True, null=True)
+    created = models.DateTimeField(db_column="created")
+
+    class Meta:
+        managed = False
+        db_table = "dio2_opt_out"
+
+
+class DIOShipments(models.Model):
+    id = models.AutoField(primary_key=True)
+    netsuiteid = models.IntegerField(db_column="netsuiteid", blank=True, null=True)
+    sku = models.CharField(max_length=255, blank=True, null=True)
+    officename = models.CharField(max_length=255, blank=True, null=True)
+    lotnumber = models.CharField(max_length=255, blank=True, null=True)
+    qty = models.IntegerField(blank=True, null=True)
+    sodate = models.DateField(blank=True, null=True)
+    sonumber = models.CharField(max_length=255, blank=True, null=True)
+    ifdate = models.DateField(blank=True, null=True)
+    ifnumber = models.CharField(max_length=255, blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = "dio_shipments"
+
+
 class Token(models.Model):
     token = models.TextField(blank=True, null=True)
     status = models.TextField(blank=True, null=True)

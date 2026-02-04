@@ -8,18 +8,21 @@ validation/creation/updating in serializers.
 Legacy Controller Mapping: OfficeController, OfficeTypeController, OfficeAgreementTypeController
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import logging
 import secrets
 from typing import Union, List
 
+import requests
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction, connections
 from django.db.models import Q, Count, Sum
+from django.utils import timezone
 from dateutil.relativedelta import relativedelta
+from django.conf import settings
 
 from fred.models.office import Office
 from fred.models.models import (
@@ -30,6 +33,8 @@ from fred.models.models import (
     DioItems,
     Skincarepairings,
     Shipment,
+    Dio2OptOut,
+    DIOShipments,
 )
 from fred.models.doctor import Doctor
 from fred.models.medication import Medication
@@ -47,6 +52,7 @@ from fred.serializers.office import (
     log_office_history,
     get_office_info,
     get_users_with_details,
+    Dio2OptOutSerializer,
 )
 from fred.serializers.payment import PaymentService
 from fred.serializers.rx import RxService
@@ -1963,7 +1969,6 @@ class OfficeInventoryReportView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-
 class OfficeEscrowReportView(APIView):
     """
     POST /office/escrowreport/
@@ -1986,18 +1991,42 @@ class OfficeEscrowReportView(APIView):
                 )
 
             query = """
-                SELECT o.name AS office_name, p.created AS dispensed_date, m.formulacode AS sku,
-                       p.qty AS dispensed_unit, p.qty * p.viprice AS dispensed_amount, r.patientid AS patientid,
-                       d.name AS doctor_name, r.id AS fredid, vid.vendorid AS vendorid
-                FROM vi_profits_report vpr
-                JOIN LATERAL jsonb_array_elements(vpr.payload::jsonb -> 'escrowHeld') AS escrow(entry) ON TRUE
+                WITH valid_reports AS (
+                    SELECT 
+                        id,
+                        officeid,
+                        created,
+                        payload::jsonb as payload_json
+                    FROM vi_profits_report
+                    WHERE officeid = %(office_id)s
+                    AND created BETWEEN TO_DATE(%(start_date)s, 'DD/MM/YYYY') 
+                        AND TO_DATE(%(end_date)s, 'DD/MM/YYYY') + INTERVAL '1' DAY - INTERVAL '1' SECOND
+                    AND payload IS NOT NULL 
+                    AND payload != ''
+                    AND payload ~ '^[\\s]*\\{'
+                    AND payload::jsonb IS NOT NULL
+                    AND payload::jsonb->'escrowHeld' IS NOT NULL
+                    AND jsonb_array_length(payload::jsonb->'escrowHeld') > 0
+                )
+                SELECT 
+                    o.name AS office_name, 
+                    p.created AS dispensed_date, 
+                    m.formulacode AS sku,
+                    p.qty AS dispensed_unit, 
+                    p.qty * p.viprice AS dispensed_amount, 
+                    r.patientid AS patientid,
+                    d.name AS doctor_name, 
+                    r.id AS fredid, 
+                    vid.vendorid AS vendorid
+                FROM valid_reports vpr
+                JOIN LATERAL jsonb_array_elements(vpr.payload_json -> 'escrowHeld') AS escrow(entry) ON TRUE
                 JOIN LATERAL jsonb_array_elements_text(escrow.entry -> 'proceedIdList') AS pid(proceed_id) ON TRUE
-                JOIN vi_proceeds p ON p.id = pid.proceed_id::int JOIN rx r ON r.id = p.rxid
-                JOIN office o ON vpr.officeid = o.id::int JOIN medication m ON m.ndc = r.medicationid
+                JOIN vi_proceeds p ON p.id = pid.proceed_id::int 
+                JOIN rx r ON r.id = p.rxid
+                JOIN office o ON vpr.officeid = o.id::int 
+                JOIN medication m ON m.ndc = r.medicationid
                 JOIN doctor d ON d.npi = (escrow.entry ->> 'fredDoctorNPI')
                 JOIN vi_doctor vid ON vid.npi = (escrow.entry ->> 'fredDoctorNPI')
-                WHERE vpr.officeid = %(office_id)s
-                AND vpr.created BETWEEN TO_DATE(%(start_date)s, 'DD/MM/YYYY') AND TO_DATE(%(end_date)s, 'DD/MM/YYYY') + INTERVAL '1' DAY - INTERVAL '1' SECOND
             """
 
             with connections["fred"].cursor() as cursor:
@@ -2029,7 +2058,6 @@ class OfficeEscrowReportView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
 
 # =============================================================================
 # SKINCARE & DIO VIEWS
@@ -2336,89 +2364,163 @@ class OfficeLoadDioView(APIView):
 class OfficeSaveDioShipmentView(APIView):
     """
     POST /office/savedioshipment/
-    Save DIO shipment.
     """
 
     def post(self, request):
+        shipments_saved = 0
+        shipment_ids = []
+        failed_shipments = []
+        
         try:
-            office_id = request.data.get("officeId")
-            if not office_id:
+            # Get token from request body
+            token = request.data.get("token")
+            netsuite_api_token = getattr(settings, "NETSUITE_API_TOKEN", None)
+            
+            # Get data array
+            data = request.data.get("data", [])
+            
+            # Validate token (PHP only processes if token matches)
+            if not netsuite_api_token or token != netsuite_api_token:
+                # Return empty response if token doesn't match (matching PHP behavior)
                 return Response(
-                    {"error": "officeId is required"},
+                    {
+                        "shipmentsLoaded": 0,
+                        "loadedShipmentIDs": [],
+                        "failedShipments": [],
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            if not isinstance(data, list):
+                return Response(
+                    {"error": "data must be an array"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            office_id = int(office_id)
-            Office.objects.using("fred").get(pk=office_id)
-
-            user_id = request.query_params.get("user_id", 0)
-            items = request.data.get("items", [])
-            tracking = request.data.get("tracking")
-            carrier = request.data.get("carrier")
-            notes = request.data.get("notes")
-            processed_items = []
-
-            with transaction.atomic(using="fred"):
-                for item in items:
-                    formulacode = item.get("formulacode")
-                    if not formulacode:
-                        continue
-                    dio_item, created = DioItems.objects.using("fred").get_or_create(
-                        officeid=office_id,
-                        formulacode=formulacode,
-                        defaults={"active": True},
+            
+            # Process each shipment
+            for shipment in data:
+                try:
+                    # Extract fields (handle both camelCase and space-separated keys)
+                    netsuite_id = shipment.get("netsuite ID") or shipment.get("netsuiteid")
+                    sku = shipment.get("item") or shipment.get("sku")
+                    officename = shipment.get("Name") or shipment.get("officename")
+                    lotnumber = shipment.get("lot #") or shipment.get("lotnumber")
+                    qty = shipment.get("qty shipped") or shipment.get("qty")
+                    sodate_str = shipment.get("SO Date") or shipment.get("sodate")
+                    sonumber = shipment.get("SO #") or shipment.get("sonumber")
+                    ifdate_str = shipment.get("IF Date") or shipment.get("ifdate")
+                    ifnumber = shipment.get("IF #") or shipment.get("ifnumber")
+                    
+                    # Parse dates
+                    sodate = None
+                    ifdate = None
+                    try:
+                        if sodate_str:
+                            if isinstance(sodate_str, str):
+                                sodate = datetime.strptime(sodate_str, "%Y-%m-%d").date()
+                            elif isinstance(sodate_str, date):
+                                sodate = sodate_str
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Invalid sodate format: {sodate_str}, error: {e}")
+                    
+                    try:
+                        if ifdate_str:
+                            if isinstance(ifdate_str, str):
+                                ifdate = datetime.strptime(ifdate_str, "%Y-%m-%d").date()
+                            elif isinstance(ifdate_str, date):
+                                ifdate = ifdate_str
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Invalid ifdate format: {ifdate_str}, error: {e}")
+                    
+                    # Check if shipment already exists
+                    exists = self._check_dio_shipment_exists(
+                        sonumber, ifnumber, sku, netsuite_id, lotnumber
                     )
-                    processed_items.append(
-                        {
-                            "formulacode": formulacode,
-                            "qty": item.get("qty", 0),
-                            "lot": item.get("lot"),
-                            "expiration": item.get("expiration"),
-                            "dioItemId": dio_item.id,
-                            "created": created,
-                        }
-                    )
-
-                log_office_history(
-                    office_id=office_id,
-                    user_id=int(user_id) if user_id else 0,
-                    triggered_action="saveDioShipmentAction",
-                    old_data=None,
-                    new_data=json.dumps(
-                        {
-                            "tracking": tracking,
-                            "carrier": carrier,
-                            "itemCount": len(processed_items),
-                        }
-                    ),
-                )
-
-            logger.info(
-                f"Saved DIO shipment for office #{office_id}: {len(processed_items)} items"
-            )
+                    
+                    if exists:
+                        failed_shipments.append({
+                            "shipmentDetails": {
+                                "netsuiteid": netsuite_id,
+                                "sku": sku,
+                                "officename": officename,
+                                "lotnumber": lotnumber,
+                                "qty": qty,
+                                "sodate": sodate,
+                                "sonumber": sonumber,
+                                "ifdate": ifdate,
+                                "ifnumber": ifnumber,
+                            },
+                            "reason": "DIO Shipment already exists",
+                        })
+                    else:
+                        # Create new shipment
+                        new_shipment = DIOShipments.objects.using("fred").create(
+                            netsuiteid=netsuite_id,
+                            sku=sku,
+                            officename=officename,
+                            lotnumber=lotnumber,
+                            qty=qty,
+                            sodate=sodate,
+                            sonumber=sonumber,
+                            ifdate=ifdate,
+                            ifnumber=ifnumber,
+                        )
+                        shipments_saved += 1
+                        shipment_ids.append(new_shipment.id)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing shipment: {e}")
+                    failed_shipments.append({
+                        "shipmentDetails": {
+                            "netsuiteid": shipment.get("netsuite ID"),
+                            "sku": shipment.get("item"),
+                            "officename": shipment.get("Name"),
+                            "lotnumber": shipment.get("lot #"),
+                            "qty": shipment.get("qty shipped"),
+                            "sodate": shipment.get("SO Date"),
+                            "sonumber": shipment.get("SO #"),
+                            "ifdate": shipment.get("IF Date"),
+                            "ifnumber": shipment.get("IF #"),
+                        },
+                        "reason": str(e),
+                    })
+            
+            # Return response matching PHP format
             return Response(
                 {
-                    "success": True,
-                    "officeId": office_id,
-                    "tracking": tracking,
-                    "carrier": carrier,
-                    "notes": notes,
-                    "itemsProcessed": len(processed_items),
-                    "items": processed_items,
+                    "shipmentsLoaded": shipments_saved,
+                    "loadedShipmentIDs": shipment_ids,
+                    "failedShipments": failed_shipments,
                 },
                 status=status.HTTP_200_OK,
             )
-
-        except Office.DoesNotExist:
-            return Response(
-                {"error": "Office not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+            
         except Exception as e:
             logger.error(f"Error saving DIO shipment: {e}")
             return Response(
-                {"error": "An unexpected error occurred"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                {
+                    "shipmentsLoaded": shipments_saved,
+                    "loadedShipmentIDs": shipment_ids,
+                    "failedShipments": failed_shipments,
+                },
+                status=status.HTTP_200_OK,
             )
+    
+    def _check_dio_shipment_exists(self, sonumber, ifnumber, sku, netsuiteid, lotnumber):
+        """
+        Check if a DIO shipment already exists based on:
+        sonumber, ifnumber, sku, netsuiteid, lotnumber
+        """
+        try:
+            return DIOShipments.objects.using("fred").filter(
+                sonumber=sonumber,
+                ifnumber=ifnumber,
+                sku=sku,
+                netsuiteid=netsuiteid,
+                lotnumber=lotnumber,
+            ).exists()
+        except Exception as e:
+            logger.error(f"Error checking if DIO shipment exists: {e}")
+            return False
 
 
 class OfficeDioOptoutView(APIView):
@@ -2429,67 +2531,101 @@ class OfficeDioOptoutView(APIView):
     """
 
     def get(self, request, pk):
+        """
+        GET /office/dio/optout/{pk}/
+        Returns all Dio2OptOut rows for the office where deletedat IS NULL.
+        """
         try:
-            office = Office.objects.using("fred").get(pk=pk)
+            records = Dio2OptOut.objects.using("fred").filter(
+                officeid=pk, deletedat__isnull=True
+            )
+            serializer = Dio2OptOutSerializer(records, many=True)
             return Response(
-                {
-                    "officeId": pk,
-                    "officeName": office.name,
-                    "replenishmentOptout": office.replenishmentoptout,
-                    "dio2Enabled": office.dio2,
-                    "virtualInventoryEnabled": office.virtualinventoryenabled,
-                    "viStatus": office.vi_status,
-                },
+                {"error": False, "results": serializer.data},
                 status=status.HTTP_200_OK,
             )
-        except Office.DoesNotExist:
-            return Response(
-                {"error": f"Office with id {pk} not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
         except Exception as e:
-            logger.error(f"Error getting DIO opt out status for office {pk}: {e}")
+            logger.error(f"Error getting Dio2OptOut list for office {pk}: {e}")
             return Response(
-                {"error": "An unexpected error occurred"},
+                {"error": True, "message": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
     def post(self, request, pk):
+        """
+        POST /office/dio/optout/{pk}/
+        """
         try:
-            office = Office.objects.using("fred").get(pk=pk)
-            user_id = request.query_params.get("user_id", 0)
-
-            with transaction.atomic(using="fred"):
-                old_value = office.replenishmentoptout
-                office.replenishmentoptout = True
-                office.save(using="fred")
-                log_office_history(
-                    office_id=pk,
-                    user_id=int(user_id) if user_id else 0,
-                    triggered_action="dioOptoutAction",
-                    old_data=json.dumps({"replenishmentoptout": old_value}),
-                    new_data=json.dumps({"replenishmentoptout": True}),
+            try:
+                Office.objects.using("fred").get(pk=pk)
+            except Office.DoesNotExist:
+                return Response(
+                    {"error": True, "message": f"Office with id {pk} not found"},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
 
-            logger.info(f"Office #{pk} opted out of DIO")
-            return Response(
-                {
-                    "success": True,
-                    "officeId": pk,
-                    "replenishmentOptout": True,
-                    "message": "Office has been opted out of DIO replenishment",
-                },
-                status=status.HTTP_200_OK,
+   
+            npi = (request.data.get("npi") or "").strip()
+
+            # Call NPI Registry 
+            npi_url = f"https://npiregistry.cms.hhs.gov/api/?version=2.1&number={npi}"
+            try:
+                resp = requests.get(npi_url, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.error(f"NPI registry request failed for NPI {npi}: {e}")
+                return Response(
+                    {"error": True, "message": "NPI Registry lookup failed"},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            if data.get("Errors") or data.get("result_count", 0) == 0:
+                return Response(
+                    {
+                        "error": True,
+                        "message": "NPI Not Found in the Official Registry",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                result0 = data["results"][0]
+                basic = result0.get("basic", {})
+                first_name = (basic.get("first_name") or "").strip()
+                last_name = (basic.get("last_name") or "").strip()
+                name = f"{first_name} {last_name}".strip()
+            except Exception:
+                name = ""
+
+            # Check if already opted out for this office
+            existing = (
+                Dio2OptOut.objects.using("fred")
+                .filter(officeid=pk, npi=npi, deletedat__isnull=True)
+                .first()
             )
-        except Office.DoesNotExist:
+            if existing:
+                return Response(
+                    {"error": True, "message": "NPI already opted out"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Create new Dio2OptOut record
+            Dio2OptOut.objects.using("fred").create(
+                officeid=pk,
+                npi=npi,
+                name=name,
+                created=timezone.now(),
+            )
+
             return Response(
-                {"error": f"Office with id {pk} not found"},
-                status=status.HTTP_404_NOT_FOUND,
+                {"error": False, "message": "Success! NPI Opted Out"},
+                status=status.HTTP_200_OK,
             )
         except Exception as e:
             logger.error(f"Error opting out of DIO for office {pk}: {e}")
             return Response(
-                {"error": "An unexpected error occurred"},
+                {"error": True, "message": "An unexpected error occurred"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

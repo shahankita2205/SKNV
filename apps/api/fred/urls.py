@@ -1099,4 +1099,16 @@ urlpatterns = [
         TextSentViewSet.as_view({"get": "get_failed_no_patient"}),
         name="textsent_failed_no_patient",
     ),
+
+    # Text controller endpoints
+    path(
+        "text/incoming/",
+        TextSentViewSet.as_view({"post": "incoming_action"}),
+        name="text_incoming",
+    ),
+    path(
+        "text/update/<str:token>/",
+        TextSentViewSet.as_view({"post": "update_text_status_action"}),
+        name="text_update",
+    ),
 ]

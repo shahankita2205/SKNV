@@ -14,7 +14,7 @@ from django.db import connections, transaction
 from django.db.models import Q
 
 from fred.models.office import Office, Officetype, Officehistory, Officeinfo
-from fred.models.models import Users
+from fred.models.models import Users, Dio2OptOut
 from fred.models.doctor import Doctor
 from fred.serializers import reference as reference_serializer
 
@@ -227,6 +227,16 @@ class OfficeModelSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Office
+        fields = "__all__"
+
+
+class Dio2OptOutSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Dio2OptOut records (NPI-level opt-outs).
+    """
+
+    class Meta:
+        model = Dio2OptOut
         fields = "__all__"
 
     def list_paginated(self, **options):

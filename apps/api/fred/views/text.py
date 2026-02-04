@@ -6,6 +6,9 @@ Contains views related to text message management.
 
 from rest_framework import viewsets, status
 from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from django.http import HttpResponse
+from twilio.twiml.messaging_response import MessagingResponse
 
 from fred.serializers.text import TextSentModelSerializer, TextPaginationQuerySerializer
 from core.permissions.legacy import legacy_roles
@@ -37,6 +40,8 @@ class TextSentViewSet(viewsets.ViewSet):
                     "manager",
                 )
             ],
+            "text_incoming - POST": [AllowAny],
+            "text_update - POST": [AllowAny],
         }
         perms = method_perms.get(
             f"{self.request.resolver_match.view_name} - {self.request.method}", []
@@ -98,3 +103,40 @@ class TextSentViewSet(viewsets.ViewSet):
                 {"error": "An error occurred while retrieving failed texts"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+    """
+    POST /text/incoming
+    Handle incoming text messages (Twilio webhook)
+    
+    Legacy Controller Mapping: TextController::incomingAction
+    """
+    
+    def incoming_action(self, request):
+        try:
+            twilio_signature = request.META.get('HTTP_X_TWILIO_SIGNATURE', '')
+            
+            if twilio_signature:
+                response = MessagingResponse()
+                response.message(
+                    "We don't monitor this number. Questions? Please call (800) 646-5040 option 1"
+                )
+                return HttpResponse(str(response), content_type='text/xml', status=status.HTTP_200_OK)
+            else:
+                return HttpResponse(status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Unexpected error processing incoming text: {e}")
+            return HttpResponse(status=status.HTTP_200_OK)
+
+    """
+    POST /text/update/{token}
+    Update text status by token (Twilio status callback)
+    
+    Legacy Controller Mapping: TextController::updateTextStatusAction
+    """
+    
+    def update_text_status_action(self, request, token):
+        try:
+            return HttpResponse("OK", status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Unexpected error updating text status: {e}")
+            return HttpResponse("OK", status=status.HTTP_200_OK)
